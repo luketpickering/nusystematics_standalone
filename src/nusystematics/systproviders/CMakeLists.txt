@@ -17,6 +17,7 @@ if(GENIEReWeight_ENABLED)
     GENIEReWeightParamConfig.cc
     GENIEReWeight_tool.cc
     SkeleWeighter_tool.cc
+    CalWeighter_tool.cc
     ZExpPCAWeighter_tool.cc)
 endif()
 
@@ -39,6 +40,7 @@ if(GENIEReWeight_ENABLED)
     GENIEReWeight_tool.hh
     GENIEResponseParameterAssociation.hh
     SkeleWeighter_tool.hh
+    CalWeighter_tool.hh
     ZExpPCAWeighter_tool.hh)
 endif()
 
