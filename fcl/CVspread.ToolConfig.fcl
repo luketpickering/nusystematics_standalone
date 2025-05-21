@@ -2,7 +2,17 @@ CVspread_toolconfig: {
 	tool_type: "CVspread"
 	instance_name: "CentralValueSpreadFromGENIE"
 
-	CVspread_variation_descriptor: "(0,1,1)"
+	reference: "GENIE_N23.root"
+
+  alt_models: [
+    { name: "NEUT"
+      input: "NEUT.root"
+    },
+    { name: "NuWro"
+      input: "NuWro.root"
+    }
+  ]
+
 	verbosity_level: 5
 }
 
