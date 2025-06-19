@@ -48,14 +48,19 @@ private:
   // headers can be storeds here
   fhicl::ParameterSet tool_options;
 
-  void LoadInputs();
-
-  std::vector<std::unique_ptr<TH3D>> ref_xs;
-
   struct DialInfo {
+
+    DialInfo(std::string prettyname_, systtools::paramId_t param_id_,
+             size_t target_pid_, size_t nu_pid_, size_t topology_,
+             std::unique_ptr<TH3D> &&weights_)
+        : prettyname(prettyname_), param_id(param_id_), target_pid(target_pid_),
+          nu_pid(nu_pid_), topology(topology_), weights(std::move(weights_)) {}
     std::string prettyname;
-    size_t pid;
-    std::vector<std::unique_ptr<TH3D>> alt_xs;
+    systtools::paramId_t param_id;
+    size_t target_pid;
+    size_t nu_pid;
+    size_t topology;
+    std::unique_ptr<TH3D> weights;
   };
   std::vector<DialInfo> dial_infos;
 

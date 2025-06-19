@@ -2,14 +2,28 @@ CVspread_toolconfig: {
 	tool_type: "CVspread"
 	instance_name: "CentralValueSpreadFromGENIE"
 
-	reference: "GENIE_N23.root"
+	reference: { 
+      name: "GENIE"
+      input: "GENIE.templates.root"
+      configurations: [ 
+        { tgt: 1000180400 nu: 14 },
+        { tgt: 1000080160 nu: 14 },
+        { tgt: 1000060120 nu: 14 },
+      ]
+  }
 
-  alt_models: [
+  alternate_models: [
     { name: "NEUT"
-      input: "NEUT.root"
+      input: "NEUT.templates.root"
+      # if no configurations supplied, assumed matches reference
     },
     { name: "NuWro"
-      input: "NuWro.root"
+      input: "NuWro.templates.root"
+      configurations: [ 
+        { tgt: 1000180400 nu: 14 },
+        { tgt: 1000080160 nu: 14 },
+        { tgt: 1000060120 nu: 14 },
+      ]
     }
   ]
 

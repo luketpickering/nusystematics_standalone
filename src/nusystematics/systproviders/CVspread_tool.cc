@@ -16,26 +16,64 @@ using namespace systtools;
 CVspread::CVspread(fhicl::ParameterSet const &params)
     : IGENIESystProvider_tool(params) {}
 
-std::vector<std::unique_ptr<TH3D>> geths(std::string const &loc) {
-  TFile fin(loc.c_str(), "READ");
-  std::vector<std::unique_ptr<TH3D>> hists;
-  for (auto hn :
-       {"CC0pi", "CC1pip", "CC1pim", "CC1pi0", "CC2cpi", "CCNpi", "CCOther",
-        "NC0pi", "NC1pip", "NC1pim", "NC1pi0", "NC2cpi", "NCNpi", "NCOther"}) {
-    hists.emplace_back(fin.Get<TH3D>(hn));
-    hists.back()->SetDirectory(nullptr);
+std::map<int, std::set<int>> get_configurations(fhicl::ParameterSet const &ps) {
+  std::map<int, std::set<int>> cfgs;
+  for (auto const &cfg :
+       ps.get<std::vector<fhicl::ParameterSet>>("configurations")) {
+    cfgs[cfg.get<int>("tgt")].insert(cfg.get<int>("nu"));
   }
-  return hists;
+  return cfgs;
 }
 
-void CVspread::LoadInputs() {
-  auto inputs = tool_options.get<fhicl::ParameterSet>("inputs");
+static std::vector<std::string> const Topologies = {
+    "CC0pi", "CC1pip", "CC1pim", "CC1pi0", "CC2cpi", "CCNpi", "CCOther",
+    "NC0pi", "NC1pip", "NC1pim", "NC1pi0", "NC2cpi", "NCNpi", "NCOther"};
 
-  ref_xs = geths(inputs.get<std::string>("reference"));
+std::map<size_t, std::map<size_t, std::vector<std::unique_ptr<TH3D>>>>
+geths(std::string const &name, fhicl::ParameterSet const &ps, int verbosity_level) {
 
-  for (auto &di : dial_infos) {
-    di.alt_xs = geths(inputs.get<std::string>(di.prettyname));
+  auto input = ps.get<std::string>("input");
+  auto cfgs = get_configurations(ps);
+
+  if (verbosity_level > 1) {
+    std::cout << "[INFO]: CVspread Reading histograms from file: " << input
+              << std::endl;
   }
+
+  TFile fin(input.c_str(), "READ");
+
+  std::map<size_t, std::map<size_t, std::vector<std::unique_ptr<TH3D>>>> hists;
+
+  for (auto const &[tgt, nupids] : cfgs) {
+    std::map<size_t, std::vector<std::unique_ptr<TH3D>>> species;
+    for (auto const &nupid : nupids) {
+      std::vector<std::unique_ptr<TH3D>> topos;
+      for (auto const &topo : Topologies) {
+        auto hname = name + "_" + topo + "_" + std::to_string(nupid) + "_" +
+                     std::to_string(tgt);
+
+        if (verbosity_level > 1) {
+          std::cout << "  - hist named: " << hname;
+        }
+
+        auto h = fin.Get<TH3D>(hname.c_str());
+        if (h) {
+          h->SetDirectory(nullptr);
+          if (verbosity_level > 1) {
+            std::cout << " exists!" << std::endl;
+          }
+        } else {
+          if (verbosity_level > 1) {
+            std::cout << " doesn't exist." << std::endl;
+          }
+        }
+        topos.emplace_back(h);
+      }
+      species[nupid] = std::move(topos);
+    }
+    hists[tgt] = std::move(species);
+  }
+  return hists;
 }
 
 SystMetaData CVspread::BuildSystMetaData(fhicl::ParameterSet const &ps,
@@ -46,26 +84,65 @@ SystMetaData CVspread::BuildSystMetaData(fhicl::ParameterSet const &ps,
   dial_variation_template.paramVariations = {0, 1};
 
   fhicl::ParameterSet inputs;
-  inputs.put("ref", ps.get<std::string>("reference"));
 
-  std::vector<std::string> alt_models;
+  auto ref_obj = ps.get<fhicl::ParameterSet>("reference");
+  inputs.put("reference", ref_obj);
 
-  for (auto const &altm :
-       ps.get<std::vector<fhicl::ParameterSet>>("alt_models")) {
+  auto ref_cfgs = get_configurations(ref_obj);
 
-    SystParamHeader phdr = dial_variation_template;
-    phdr.prettyName = altm.get<std::string>("name");
-    alt_models.push_back(phdr.prettyName);
+  std::vector<fhicl::ParameterSet> alternate_models;
 
-    inputs.put(phdr.prettyName, altm.get<std::string>("input"));
+  for (auto altm :
+       ps.get<std::vector<fhicl::ParameterSet>>("alternate_models")) {
 
-    phdr.systParamId = firstId++;
+    auto name = altm.get<std::string>("name");
 
-    smd.push_back(phdr);
+    std::map<int, std::set<int>> alt_cfgs;
+
+    if (altm.has_key("configurations")) {
+      alt_cfgs = get_configurations(altm);
+      for (auto const &[tgt, nupids] : alt_cfgs) {
+        if (!ref_cfgs.count(tgt)) {
+          std::stringstream ss;
+          ss << "Alternate model: " << name << " provides target: " << tgt
+             << " for which we have no reference xsec.";
+          throw std::runtime_error(ss.str());
+        }
+        for (auto const &nupid : nupids) {
+          if (!ref_cfgs[tgt].count(nupid)) {
+            std::stringstream ss;
+            ss << "Alternate model: " << name
+               << " provides neutrino species: " << nupid
+               << " on target: " << tgt
+               << " for which we have no reference xsec.";
+            throw std::runtime_error(ss.str());
+          }
+        }
+      }
+    } else {
+      alt_cfgs = ref_cfgs;
+      altm.put("configurations",
+               ref_obj.get<std::vector<fhicl::ParameterSet>>("configurations"));
+    }
+
+    for (auto const &[tgt, nupids] : alt_cfgs) {
+      for (auto const &nupid : nupids) {
+        for (auto const &topo : Topologies) {
+          SystParamHeader phdr = dial_variation_template;
+          phdr.prettyName = name + "_" + topo + "_" + std::to_string(nupid) +
+                            "_" + std::to_string(tgt);
+          phdr.systParamId = firstId++;
+          smd.push_back(phdr);
+        }
+      }
+    }
+
+    alternate_models.push_back(altm);
   }
 
+  inputs.put("alternate_models", alternate_models);
+
   tool_options.put("inputs", inputs);
-  tool_options.put("alt_models", alt_models);
   tool_options.put("verbosity_level", ps.get<int>("verbosity_level", 0));
 
   return smd;
@@ -75,33 +152,62 @@ bool CVspread::SetupResponseCalculator(
     fhicl::ParameterSet const &tool_options) {
   verbosity_level = tool_options.get<int>("verbosity_level", 0);
 
-  std::vector<std::string> alt_models =
-      tool_options.get<std::vector<std::string>>("alt_models");
+  auto inputs = tool_options.get<fhicl::ParameterSet>("inputs");
+
+  auto ref_ps = inputs.get<fhicl::ParameterSet>("reference");
+
+  auto name = ref_ps.get<std::string>("name");
+  auto ref_xs = geths(name, ref_ps, verbosity_level);
 
   // grab the pre-parsed param headers object
   SystMetaData const &md = GetSystMetaData();
 
-  for (auto altm : alt_models) {
+  for (auto altm :
+       inputs.get<std::vector<fhicl::ParameterSet>>("alternate_models")) {
 
-    if (!HasParam(md, altm)) {
-      if (verbosity_level > 1) {
-        std::cout << "[INFO]: Don't have parameter " << altm
-                  << " in SystMetaData. Skipping configuration." << std::endl;
+    auto name = altm.get<std::string>("name");
+    auto altm_xs = geths(name, altm, verbosity_level);
+
+    for (auto &[tgt, nupids] : altm_xs) {
+      for (auto &[nupid, hists] : nupids) {
+        for (size_t h_it = 0; h_it < hists.size(); ++h_it) {
+
+          if (!hists[h_it]) {
+            continue;
+          }
+
+          auto topo = Topologies[h_it];
+
+          auto dial_prettyname = name + "_" + topo + "_" +
+                                 std::to_string(nupid) + "_" +
+                                 std::to_string(tgt);
+
+          if (!HasParam(md, dial_prettyname)) {
+            if (verbosity_level > 1) {
+              std::cout << "[INFO]: Don't have parameter " << dial_prettyname
+                        << " in SystMetaData. Skipping configuration."
+                        << std::endl;
+            }
+            continue;
+          }
+
+          auto pid = GetParamIndex(md, dial_prettyname);
+
+          if (verbosity_level > 1) {
+            std::cout << "[INFO]: Have parameter " << dial_prettyname
+                      << " in SystMetaData with ParamId: " << pid
+                      << ". Configuring." << std::endl;
+          }
+
+          dial_infos.emplace_back(dial_prettyname, pid, tgt, nupid, h_it,
+                                  std::move(hists[h_it]));
+          auto ref = ref_xs[tgt][nupid][h_it].get();
+          dial_infos.back().weights->Divide(ref);
+        }
       }
-      continue;
     }
-
-    auto pid = GetParamIndex(md, altm);
-
-    if (verbosity_level > 1) {
-      std::cout << "[INFO]: Have parameter " << altm
-                << " in SystMetaData with ParamId: " << pid << ". Configuring."
-                << std::endl;
-    }
-    dial_infos.push_back(DialInfo{altm, pid, {}});
   }
-  LoadInputs();
-  // returning cleanly
+
   return true;
 }
 
@@ -241,9 +347,11 @@ event_unit_response_t CVspread::GetEventResponse(genie::EventRecord const &ev) {
 
   genie::GHepParticle *FSLep = ev.FinalStatePrimaryLepton();
 
-  if (!FSLep || !ISLep) {
+  if (!FSLep || !ISLep || !ev.TargetNucleus()) {
     return resp;
   }
+
+  auto TargetPDG = ev.TargetNucleus()->Pdg();
 
   auto topo = get_reweight_topology(ev);
 
@@ -261,33 +369,34 @@ event_unit_response_t CVspread::GetEventResponse(genie::EventRecord const &ev) {
   auto W_nuc_rest_GeV =
       std::sqrt((-Q2_GeV) + (2 * m_p_GeV * q_0_GeV) + (m_p_GeV * m_p_GeV));
 
-  // get individual axis bins and check that the value is in range.
-  int binX = ref_xs[topo]->GetXaxis()->FindBin(Enu_true);
-  if ((binX == 0) || (binX == ref_xs[topo]->GetXaxis()->GetNbins() + 1)) {
-    return resp;
-  }
-  int binY = ref_xs[topo]->GetYaxis()->FindBin(W_nuc_rest_GeV);
-  if ((binY == 0) || (binY == ref_xs[topo]->GetYaxis()->GetNbins() + 1)) {
-    return resp;
-  }
-  int binZ = ref_xs[topo]->GetZaxis()->FindBin(Q2_GeV);
-  if ((binZ == 0) || (binZ == ref_xs[topo]->GetZaxis()->GetNbins() + 1)) {
-    return resp;
-  }
-
-  int binGlobal = ref_xs[topo]->GetBin(binX, binY, binZ);
-
-  // Get the bin content
-  double ev_ref_xs = ref_xs[topo]->GetBinContent(binGlobal);
-
   // loop through and calculate weights
   for (auto const &di : dial_infos) {
 
-    resp.push_back({di.pid, {}});
+    if ((di.target_pid != TargetPDG) || (di.nu_pid != ISLep->Pdg()) ||
+        (di.topology != topo) || (!di.weights)) {
+      continue;
+    }
 
-    double ev_xs_ratio = di.alt_xs[topo]->GetBinContent(binGlobal) / ev_ref_xs;
+    resp.push_back({di.param_id, {1.0, 1.0}});
 
-    resp.back().responses = {1.0, 1.0 + (ev_xs_ratio - 1.0)};
+    // get individual axis bins and check that the value is in range.
+    int binX = di.weights->GetXaxis()->FindFixBin(Enu_true);
+    if ((binX == 0) || (binX == di.weights->GetXaxis()->GetNbins() + 1)) {
+      continue;
+    }
+    int binY = di.weights->GetYaxis()->FindFixBin(W_nuc_rest_GeV);
+    if ((binY == 0) || (binY == di.weights->GetYaxis()->GetNbins() + 1)) {
+      continue;
+    }
+    int binZ = di.weights->GetZaxis()->FindFixBin(Q2_GeV);
+    if ((binZ == 0) || (binZ == di.weights->GetZaxis()->GetNbins() + 1)) {
+      continue;
+    }
+
+    auto w = di.weights->GetBinContent(binX, binY, binZ);
+
+    resp.back().responses[1] = std::min(std::max(w, 0.0), 10.0);
+
     if (verbosity_level > 3) {
       std::cout << "[DEBG]: For parameter " << di.prettyname << " at variation["
                 << 1 << "] = " << 1
