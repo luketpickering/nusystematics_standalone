@@ -26,8 +26,8 @@ std::map<int, std::set<int>> get_configurations(fhicl::ParameterSet const &ps) {
 }
 
 static std::vector<std::string> const Topologies = {
-    "CC0pi", "CC1pip", "CC1pim", "CC1pi0", "CC2cpi", "CCNpi", "CCOther",
-    "NC0pi", "NC1pip", "NC1pim", "NC1pi0", "NC2cpi", "NCNpi", "NCOther"};
+    "CC0pi", "CC1pip", "CC1pim", "CC1pi0", "CC2cpi", "CCGamma", "CCNpi", "CCOther",
+    "NC0pi", "NC1pip", "NC1pim", "NC1pi0", "NC2cpi", "NCGamma", "NCNpi", "NCOther"};
 
 std::map<size_t, std::map<size_t, std::vector<std::unique_ptr<TH3D>>>>
 geths(std::string const &name, fhicl::ParameterSet const &ps, int verbosity_level) {
@@ -220,6 +220,7 @@ struct Topology {
     kCC1pi0,
     kCC2cpi,
     kCCNpi,
+    kCCGamma,
     kCCOther,
     kNC0pi,
     kNC1pip,
@@ -227,6 +228,7 @@ struct Topology {
     kNC1pi0,
     kNC2cpi,
     kNCNpi,
+    kNCGamma,
     kNCOther,
     kInvalid
   };
@@ -288,7 +290,9 @@ Topology::topo get_reweight_topology(genie::EventRecord const &ev) {
       break;
     }
     case 22: {
-      ngamma++;
+      if(p.P4()->E() > 0.01){
+        ngamma++;
+      }
       break;
     }
     default: {
@@ -315,7 +319,7 @@ Topology::topo get_reweight_topology(genie::EventRecord const &ev) {
   }
 
   if (ngamma) {
-    return iscc ? Topology::kCCOther : Topology::kNCOther;
+    return iscc ? Topology::kCCGamma : Topology::kNCGamma;
   }
 
   if (npi0) {
