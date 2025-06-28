@@ -6,9 +6,9 @@ CVspread_toolconfig: {
       name: "GENIE"
       input: "GENIE.templates.root"
       configurations: [ 
-        { tgt: 1000180400 nu: 14 },
-        { tgt: 1000080160 nu: 14 },
-        { tgt: 1000060120 nu: 14 },
+        { tgt: 1000180400 probe: "numu" },
+        { tgt: 1000080160 probe: "numu" },
+        { tgt: 1000060120 probe: "numu" },
       ]
   }
 
@@ -20,9 +20,9 @@ CVspread_toolconfig: {
     { name: "NuWro"
       input: "NuWro.templates.root"
       configurations: [ 
-        { tgt: 1000180400 nu: 14 },
-        { tgt: 1000080160 nu: 14 },
-        { tgt: 1000060120 nu: 14 },
+        { tgt: 1000180400 probe: "numu" },
+        { tgt: 1000080160 probe: "numu" },
+        { tgt: 1000060120 probe: "numu" },
       ]
     }
   ]

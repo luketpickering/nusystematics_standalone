@@ -16,21 +16,41 @@ using namespace systtools;
 CVspread::CVspread(fhicl::ParameterSet const &params)
     : IGENIESystProvider_tool(params) {}
 
-std::map<int, std::set<int>> get_configurations(fhicl::ParameterSet const &ps) {
-  std::map<int, std::set<int>> cfgs;
+std::map<int, std::set<std::string>>
+get_configurations(fhicl::ParameterSet const &ps) {
+  std::map<int, std::set<std::string>> cfgs;
   for (auto const &cfg :
        ps.get<std::vector<fhicl::ParameterSet>>("configurations")) {
-    cfgs[cfg.get<int>("tgt")].insert(cfg.get<int>("nu"));
+    cfgs[cfg.get<int>("tgt")].insert(cfg.get<std::string>("probe"));
   }
   return cfgs;
 }
 
-static std::vector<std::string> const Topologies = {
-    "CC0pi", "CC1pip", "CC1pim", "CC1pi0", "CC2cpi", "CCGamma", "CCNpi", "CCOther",
-    "NC0pi", "NC1pip", "NC1pim", "NC1pi0", "NC2cpi", "NCGamma", "NCNpi", "NCOther"};
+int nupid(std::string const &nutype) {
+  if (nutype == "numu") {
+    return 14;
+  }
+  if (nutype == "numubar") {
+    return 14;
+  }
+  if (nutype == "nue") {
+    return 14;
+  }
+  if (nutype == "nuebar") {
+    return 14;
+  }
+  throw std::runtime_error(std::string("Invalid nutype: ") + nutype +
+                           " encountered.");
+}
 
-std::map<size_t, std::map<size_t, std::vector<std::unique_ptr<TH3D>>>>
-geths(std::string const &name, fhicl::ParameterSet const &ps, int verbosity_level) {
+static std::vector<std::string> const Topologies = {
+    "CC0pi",  "CC1pip",  "CC1pim", "CC1pi0", "CC2cpi", "CCGamma",
+    "CCNpi",  "CCOther", "NC0pi",  "NC1pip", "NC1pim", "NC1pi0",
+    "NC2cpi", "NCGamma", "NCNpi",  "NCOther"};
+
+std::map<size_t, std::map<std::string, std::vector<std::unique_ptr<TH3D>>>>
+geths(std::string const &name, fhicl::ParameterSet const &ps,
+      int verbosity_level) {
 
   auto input = ps.get<std::string>("input");
   auto cfgs = get_configurations(ps);
@@ -42,15 +62,16 @@ geths(std::string const &name, fhicl::ParameterSet const &ps, int verbosity_leve
 
   TFile fin(input.c_str(), "READ");
 
-  std::map<size_t, std::map<size_t, std::vector<std::unique_ptr<TH3D>>>> hists;
+  std::map<size_t, std::map<std::string, std::vector<std::unique_ptr<TH3D>>>>
+      hists;
 
-  for (auto const &[tgt, nupids] : cfgs) {
-    std::map<size_t, std::vector<std::unique_ptr<TH3D>>> species;
-    for (auto const &nupid : nupids) {
+  for (auto const &[tgt, nutypes] : cfgs) {
+    std::map<std::string, std::vector<std::unique_ptr<TH3D>>> species;
+    for (auto const &nutype : nutypes) {
       std::vector<std::unique_ptr<TH3D>> topos;
       for (auto const &topo : Topologies) {
-        auto hname = name + "_" + topo + "_" + std::to_string(nupid) + "_" +
-                     std::to_string(tgt);
+        auto hname =
+            name + "_" + topo + "_" + nutype + "_" + std::to_string(tgt);
 
         if (verbosity_level > 1) {
           std::cout << "  - hist named: " << hname;
@@ -69,7 +90,7 @@ geths(std::string const &name, fhicl::ParameterSet const &ps, int verbosity_leve
         }
         topos.emplace_back(h);
       }
-      species[nupid] = std::move(topos);
+      species[nutype] = std::move(topos);
     }
     hists[tgt] = std::move(species);
   }
@@ -97,22 +118,22 @@ SystMetaData CVspread::BuildSystMetaData(fhicl::ParameterSet const &ps,
 
     auto name = altm.get<std::string>("name");
 
-    std::map<int, std::set<int>> alt_cfgs;
+    std::map<int, std::set<std::string>> alt_cfgs;
 
     if (altm.has_key("configurations")) {
       alt_cfgs = get_configurations(altm);
-      for (auto const &[tgt, nupids] : alt_cfgs) {
+      for (auto const &[tgt, nutypes] : alt_cfgs) {
         if (!ref_cfgs.count(tgt)) {
           std::stringstream ss;
           ss << "Alternate model: " << name << " provides target: " << tgt
              << " for which we have no reference xsec.";
           throw std::runtime_error(ss.str());
         }
-        for (auto const &nupid : nupids) {
-          if (!ref_cfgs[tgt].count(nupid)) {
+        for (auto const &nutype : nutypes) {
+          if (!ref_cfgs[tgt].count(nutype)) {
             std::stringstream ss;
             ss << "Alternate model: " << name
-               << " provides neutrino species: " << nupid
+               << " provides neutrino species: " << nutype
                << " on target: " << tgt
                << " for which we have no reference xsec.";
             throw std::runtime_error(ss.str());
@@ -125,12 +146,12 @@ SystMetaData CVspread::BuildSystMetaData(fhicl::ParameterSet const &ps,
                ref_obj.get<std::vector<fhicl::ParameterSet>>("configurations"));
     }
 
-    for (auto const &[tgt, nupids] : alt_cfgs) {
-      for (auto const &nupid : nupids) {
+    for (auto const &[tgt, nutypes] : alt_cfgs) {
+      for (auto const &nutype : nutypes) {
         for (auto const &topo : Topologies) {
           SystParamHeader phdr = dial_variation_template;
-          phdr.prettyName = name + "_" + topo + "_" + std::to_string(nupid) +
-                            "_" + std::to_string(tgt);
+          phdr.prettyName =
+              name + "_" + topo + "_" + nutype + "_" + std::to_string(tgt);
           phdr.systParamId = firstId++;
           smd.push_back(phdr);
         }
@@ -168,8 +189,8 @@ bool CVspread::SetupResponseCalculator(
     auto name = altm.get<std::string>("name");
     auto altm_xs = geths(name, altm, verbosity_level);
 
-    for (auto &[tgt, nupids] : altm_xs) {
-      for (auto &[nupid, hists] : nupids) {
+    for (auto &[tgt, nutypes] : altm_xs) {
+      for (auto &[nutype, hists] : nutypes) {
         for (size_t h_it = 0; h_it < hists.size(); ++h_it) {
 
           if (!hists[h_it]) {
@@ -178,9 +199,8 @@ bool CVspread::SetupResponseCalculator(
 
           auto topo = Topologies[h_it];
 
-          auto dial_prettyname = name + "_" + topo + "_" +
-                                 std::to_string(nupid) + "_" +
-                                 std::to_string(tgt);
+          auto dial_prettyname =
+              name + "_" + topo + "_" + nutype + "_" + std::to_string(tgt);
 
           if (!HasParam(md, dial_prettyname)) {
             if (verbosity_level > 1) {
@@ -199,9 +219,9 @@ bool CVspread::SetupResponseCalculator(
                       << ". Configuring." << std::endl;
           }
 
-          dial_infos.emplace_back(dial_prettyname, pid, tgt, nupid, h_it,
-                                  std::move(hists[h_it]));
-          auto ref = ref_xs[tgt][nupid][h_it].get();
+          dial_infos.emplace_back(dial_prettyname, pid, tgt, nupid(nutype),
+                                  h_it, std::move(hists[h_it]));
+          auto ref = ref_xs[tgt][nutype][h_it].get();
           dial_infos.back().weights->Divide(ref);
         }
       }
@@ -290,7 +310,7 @@ Topology::topo get_reweight_topology(genie::EventRecord const &ev) {
       break;
     }
     case 22: {
-      if(p.P4()->E() > 0.01){
+      if (p.P4()->E() > 0.01) {
         ngamma++;
       }
       break;
